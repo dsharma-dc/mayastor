@@ -1,3 +1,4 @@
+use chrono::Utc;
 use futures::channel::oneshot::Receiver;
 use snafu::ResultExt;
 use std::{marker::PhantomData, pin::Pin};
@@ -15,7 +16,13 @@ use super::{
 
 use crate::{
     core::{Reactors, VerboseError},
-    rebuild::{RebuildError, RebuildJob, RebuildState, RebuildStats},
+    rebuild::{
+        RebuildError,
+        RebuildJob,
+        RebuildRecord,
+        RebuildState,
+        RebuildStats,
+    },
 };
 
 /// Rebuild pause guard ensures rebuild jobs are resumed before it is dropped.
@@ -236,6 +243,14 @@ impl<'n> Nexus<'n> {
         Ok(rj.stats())
     }
 
+    /// Iterate over the replica rebuild history for this nexus
+    /// and return it as output.
+    pub async fn rebuild_history(
+        &self, // XXX: How to use Pin<&mut Self> and return vector reference?
+    ) -> Result<&Vec<RebuildRecord<'_>>, Error> {
+        Ok(&self.rebuild_history)
+    }
+
     /// Returns the rebuild progress of a rebuild job for the given destination.
     pub fn rebuild_progress(
         self: Pin<&mut Self>,
@@ -349,6 +364,21 @@ impl<'n> Nexus<'n> {
         })
     }
 
+    /// Create a rebuild history record of current rebuild job and insert it
+    /// into Vector/Hashmap which is part of the Nexus. These history
+    /// records are kept as history data in-core, and not leveraged in data
+    /// path for rest of the rebuild logic.
+    fn create_rebuild_record(self: Pin<&mut Self>, job: &RebuildJob) {
+        // We'd want to have rebuild record on best effort basis. In case,
+        // record allocation is not successful we continue with rest of
+        // the rebuild job processing.
+        if let Ok(record) = RebuildRecord::new(job) {
+            let rec_vec =
+                unsafe { &mut self.get_unchecked_mut().rebuild_history };
+            rec_vec.push(record);
+        }
+    }
+
     /// On rebuild job completion it updates the child and the nexus
     /// based on the rebuild job's final state
     async fn on_rebuild_update(
@@ -366,7 +396,7 @@ impl<'n> Nexus<'n> {
             warn!("{:?}: inconsistent rebuild job state", dst_child);
             return Ok(());
         }
-        let job = job.unwrap();
+        let mut job = job.unwrap();
 
         match job.state() {
             RebuildState::Completed => {
@@ -416,7 +446,9 @@ impl<'n> Nexus<'n> {
             }
         }
 
+        job.end = Some(Utc::now());
         self.reconfigure(DrEvent::ChildRebuild).await;
+        self.create_rebuild_record(&job);
 
         Ok(())
     }

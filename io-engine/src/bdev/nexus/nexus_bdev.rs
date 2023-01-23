@@ -51,6 +51,7 @@ use crate::{
         Share,
         VerboseError,
     },
+    rebuild::RebuildRecord,
     subsys::NvmfSubsystem,
 };
 
@@ -258,6 +259,8 @@ pub struct Nexus<'n> {
     io_subsystem: Option<NexusIoSubsystem<'n>>,
     /// TODO
     event_sink: Option<DeviceEventSink>,
+    /// Rebuild history of all children of this nexus instance.
+    pub rebuild_history: Vec<RebuildRecord<'n>>,
     /// TODO
     #[allow(dead_code)]
     pub(super) injections: Injections,
@@ -366,6 +369,7 @@ impl<'n> Nexus<'n> {
             io_subsystem: None,
             nexus_uuid: Default::default(),
             event_sink: None,
+            rebuild_history: Vec::new(),
             injections: Injections::new(),
             shutdown_requested: AtomicCell::new(false),
             _pin: Default::default(),

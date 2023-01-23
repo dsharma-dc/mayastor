@@ -41,7 +41,7 @@ use crate::{
     host::{blk_device, resource},
     lvs::{Error as LvsError, Lvol, LvolSpaceUsage, Lvs},
     pool_backend::PoolArgs,
-    rebuild::{RebuildState, RebuildStats},
+    rebuild::{RebuildRecord, RebuildState, RebuildStats},
     subsys::PoolConfig,
 };
 
@@ -341,6 +341,20 @@ impl From<RebuildStats> for RebuildStatsReply {
             block_size: stats.block_size,
             tasks_total: stats.tasks_total,
             tasks_active: stats.tasks_active,
+        }
+    }
+}
+
+impl From<&RebuildRecord<'_>> for RebuildHistoryRecord {
+    fn from(record: &RebuildRecord) -> Self {
+        RebuildHistoryRecord {
+            dst_uri: record.dst_uri.clone(),
+            src_uri: record.src_uri.clone(),
+            state: record.state.to_string(),
+            is_partial: record.partial_rebuild,
+            rebuilt_data_size: record.rebuilt_data_size,
+            started_at: record.start.format("%d/%m/%YT%T").to_string(),
+            ended_at: record.end.format("%d/%m/%YT%T").to_string(),
         }
     }
 }
@@ -1656,6 +1670,37 @@ impl mayastor_server::Mayastor for MayastorSvc {
                     .rebuild_stats(&args.uri)
                     .await
                     .map(RebuildStatsReply::from)
+            })?;
+            rx.await
+                .map_err(|_| Status::cancelled("cancelled"))?
+                .map_err(Status::from)
+                .map(Response::new)
+        })
+        .await
+    }
+
+    #[named]
+    async fn get_rebuild_history(
+        &self,
+        request: Request<RebuildHistoryRequest>,
+    ) -> GrpcResult<RebuildHistoryReply> {
+        let ctx = GrpcClientContext::new(&request, function_name!());
+        let args = request.into_inner();
+
+        self.serialized(ctx, args.uuid.clone(), false, async move {
+            trace!("{:?}", args);
+            let rx = rpc_submit::<_, _, nexus::Error>(async move {
+                let records = nexus_lookup(&args.uuid)?
+                    .rebuild_history()
+                    .await
+                    .unwrap()
+                    .iter()
+                    .map(RebuildHistoryRecord::from)
+                    .collect();
+                Ok(RebuildHistoryReply {
+                    nexus: String::from(nexus_lookup(&args.uuid)?.nexus_name()),
+                    records,
+                })
             })?;
             rx.await
                 .map_err(|_| Status::cancelled("cancelled"))?
