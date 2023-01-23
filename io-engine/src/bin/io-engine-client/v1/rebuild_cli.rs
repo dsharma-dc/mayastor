@@ -24,6 +24,7 @@ pub async fn handler(
         ("state", Some(args)) => state(ctx, args).await,
         ("stats", Some(args)) => stats(ctx, args).await,
         ("progress", Some(args)) => progress(ctx, args).await,
+        ("history", Some(args)) => history(ctx, args).await,
         (cmd, _) => {
             Err(Status::not_found(format!("command {} does not exist", cmd)))
                 .context(GrpcStatus)
@@ -137,6 +138,15 @@ pub fn subcommands<'a, 'b>() -> App<'a, 'b> {
                 .help("uri of child to get the rebuild progress from"),
         );
 
+    let history = SubCommand::with_name("history")
+        .about("shows the rebuild history for children of a nexus")
+        .arg(
+            Arg::with_name("uuid")
+                .required(true)
+                .index(1)
+                .help("uuid of the nexus"),
+        );
+
     SubCommand::with_name("rebuild")
         .settings(&[
             AppSettings::SubcommandRequiredElseHelp,
@@ -151,6 +161,7 @@ pub fn subcommands<'a, 'b>() -> App<'a, 'b> {
         .subcommand(state)
         .subcommand(stats)
         .subcommand(progress)
+        .subcommand(history)
 }
 
 async fn start(
@@ -369,6 +380,69 @@ async fn state(
                 vec!["state"],
                 vec![vec![response.get_ref().state.clone()]],
             );
+        }
+    };
+
+    Ok(())
+}
+
+async fn history(
+    mut ctx: Context,
+    matches: &ArgMatches<'_>,
+) -> crate::Result<()> {
+    let uuid = matches
+        .value_of("uuid")
+        .ok_or_else(|| ClientError::MissingValue {
+            field: "uuid".to_string(),
+        })?
+        .to_string();
+
+    let response = ctx
+        .client
+        .get_rebuild_history(rpc::RebuildHistoryRequest {
+            uuid: uuid.clone(),
+        })
+        .await
+        .context(GrpcStatus)?;
+
+    match ctx.output {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response.get_ref())
+                    .unwrap()
+                    .to_colored_json_auto()
+                    .unwrap()
+            );
+        }
+        OutputFormat::Default => {
+            let response = &response.get_ref();
+            println!("**** Rebuild history for nexus: {} ****", response.nexus);
+            for record in response.records.iter() {
+                ctx.print_list(
+                    vec![
+                        "destination-child",
+                        "source-child",
+                        "rebuilt-data-size",
+                        "rebuild-job-state",
+                        "partial-rebuild",
+                        "start-time",
+                        "end-time",
+                    ],
+                    vec![vec![
+                        record.dst_uri.clone(),
+                        record.src_uri.clone(),
+                        record.rebuilt_data_size.to_string(),
+                        record.state.clone(),
+                        record.is_partial.to_string(),
+                        record.started_at.clone(),
+                        record.ended_at.clone(),
+                    ]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()],
+                );
+            }
         }
     };
 
