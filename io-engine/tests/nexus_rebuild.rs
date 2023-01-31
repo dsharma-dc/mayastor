@@ -306,6 +306,8 @@ async fn rebuild_replica() {
             .remove_child(&get_dev(NUM_CHILDREN + 1))
             .await
             .unwrap();
+        //let history = nexus.rebuild_history();
+        //assert_ne!(history.len(), 0);
         nexus_lookup_mut(nexus_name())
             .unwrap()
             .destroy()

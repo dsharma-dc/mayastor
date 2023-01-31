@@ -345,12 +345,25 @@ impl From<RebuildStats> for RebuildStatsReply {
     }
 }
 
-impl From<&RebuildRecord<'_>> for RebuildHistoryRecord {
+impl From<RebuildState> for mayastor_api::v0::RebuildJobState {
+    fn from(state: RebuildState) -> Self {
+        match state {
+            RebuildState::Init => RebuildState::Init,
+            RebuildState::Running => RebuildState::Running,
+            RebuildState::Stopped => RebuildState::Stopped,
+            RebuildState::Paused => RebuildState::Paused,
+            RebuildState::Failed => RebuildState::Failed,
+            RebuildState::Completed => RebuildState::Completed,
+        }
+    }
+}
+
+impl From<&RebuildRecord> for RebuildHistoryRecord {
     fn from(record: &RebuildRecord) -> Self {
         RebuildHistoryRecord {
             dst_uri: record.dst_uri.clone(),
             src_uri: record.src_uri.clone(),
-            state: record.state.to_string(),
+            state: mayastor_api::v0::RebuildJobState::from(record.state) as i32,
             is_partial: record.partial_rebuild,
             rebuilt_data_size: record.rebuilt_data_size,
             started_at: record.start.format("%d/%m/%YT%T").to_string(),
@@ -1692,13 +1705,14 @@ impl mayastor_server::Mayastor for MayastorSvc {
             let rx = rpc_submit::<_, _, nexus::Error>(async move {
                 let records = nexus_lookup(&args.uuid)?
                     .rebuild_history()
-                    .await
                     .unwrap()
                     .iter()
                     .map(RebuildHistoryRecord::from)
                     .collect();
                 Ok(RebuildHistoryReply {
-                    nexus: String::from(nexus_lookup(&args.uuid)?.nexus_name()),
+                    nexus: String::from(
+                        nexus_lookup(&args.uuid)?.uuid().to_string(),
+                    ),
                     records,
                 })
             })?;

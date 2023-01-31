@@ -260,7 +260,7 @@ pub struct Nexus<'n> {
     /// TODO
     event_sink: Option<DeviceEventSink>,
     /// Rebuild history of all children of this nexus instance.
-    pub rebuild_history: Vec<RebuildRecord<'n>>,
+    pub rebuild_history: Vec<RebuildRecord>,
     /// TODO
     #[allow(dead_code)]
     pub(super) injections: Injections,

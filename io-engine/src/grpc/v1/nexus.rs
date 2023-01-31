@@ -20,7 +20,7 @@ use std::{
 };
 use tonic::{Request, Response, Status};
 
-use mayastor_api::v1::nexus::*;
+use mayastor_api::v1::{nexus::*, *};
 
 #[derive(Debug)]
 struct UnixStream(tokio::net::UnixStream);
@@ -1000,6 +1000,38 @@ impl NexusRpc for NexusService {
                     .rebuild_stats(&args.uri)
                     .await
                     .map(RebuildStatsResponse::from)
+            })?;
+            rx.await
+                .map_err(|_| Status::cancelled("cancelled"))?
+                .map_err(Status::from)
+                .map(Response::new)
+        })
+        .await
+    }
+
+    #[named]
+    async fn get_rebuild_history(
+        &self,
+        request: Request<RebuildHistoryRequest>,
+    ) -> GrpcResult<RebuildHistoryResponse> {
+        let ctx = GrpcClientContext::new(&request, function_name!());
+        let args = request.into_inner();
+
+        self.serialized(ctx, args.uuid.clone(), false, async move {
+            trace!("{:?}", args);
+            let rx = rpc_submit::<_, _, nexus::Error>(async move {
+                let records = nexus_lookup(&args.uuid)?
+                    .rebuild_history()
+                    .unwrap()
+                    .iter()
+                    .map(RebuildHistoryRecord::from)
+                    .collect();
+                Ok(RebuildHistoryResponse {
+                    nexus: String::from(
+                        nexus_lookup(&args.uuid)?.uuid().to_string(),
+                    ),
+                    records,
+                })
             })?;
             rx.await
                 .map_err(|_| Status::cancelled("cancelled"))?

@@ -1,8 +1,8 @@
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, Utc};
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use futures::channel::{mpsc, oneshot};
 use snafu::ResultExt;
-use std::{fmt, marker::PhantomData};
+use std::fmt;
 
 use spdk_rs::{DmaBuf, LbaRange};
 
@@ -77,7 +77,7 @@ impl std::fmt::Display for RebuildOperation {
 
 /// A rebuild record is a lightweight extract of rebuild job that is maintained
 /// for the statistics.
-pub struct RebuildRecord<'n> {
+pub struct RebuildRecord {
     /// source URI of the healthy child to rebuild from
     pub src_uri: String,
     /// target URI of the out of sync child in need of a rebuild
@@ -93,44 +93,6 @@ pub struct RebuildRecord<'n> {
     pub start: DateTime<Utc>,
     /// End time of this rebuild
     pub end: DateTime<Utc>,
-    // Unused lifetime parameter
-    _n: PhantomData<&'n ()>,
-}
-
-impl<'n> RebuildRecord<'n> {
-    /// Create a new rebuild history record when this child undergoes a rebuild
-    /// job.
-    pub fn new(rebuild_job: &RebuildJob) -> Result<Self, RebuildError> {
-        trace!(
-            "Create Rebuild Record for child {} of nexus {}",
-            rebuild_job.dst_uri,
-            rebuild_job.nexus_name
-        );
-        Ok(Self {
-            src_uri: rebuild_job.src_uri.to_string(),
-            dst_uri: rebuild_job.dst_uri.to_string(),
-            // TODO: Set boolean correctly after partial rebuild changes
-            partial_rebuild: false,
-            state: rebuild_job.state(),
-            // TODO: Set data size correctly after partial rebuild changes
-            rebuilt_data_size: 0,
-            // If timestamp in rebuild job is invalid, set it as epoch in the
-            // record.
-            start: rebuild_job.start.unwrap_or_else(|| {
-                DateTime::<Utc>::from_utc(
-                    NaiveDateTime::from_timestamp_opt(0, 0).unwrap(),
-                    Utc,
-                )
-            }),
-            end: rebuild_job.end.unwrap_or_else(|| {
-                DateTime::<Utc>::from_utc(
-                    NaiveDateTime::from_timestamp_opt(0, 0).unwrap(),
-                    Utc,
-                )
-            }),
-            _n: Default::default(),
-        })
-    }
 }
 
 /// A rebuild job is responsible for managing a rebuild (copy) which reads
@@ -166,9 +128,7 @@ pub struct RebuildJob<'n> {
     /// rebuild copy error, if any
     pub error: Option<RebuildError>,
     /// Start time of this rebuild job
-    pub start: Option<DateTime<Utc>>,
-    /// End time of this rebuild job
-    pub end: Option<DateTime<Utc>>,
+    pub start: DateTime<Utc>,
 
     // Pre-opened descriptors for source/destination block device.
     #[allow(clippy::non_send_fields_in_send_ty)]
@@ -280,8 +240,7 @@ impl<'n> RebuildJob<'n> {
             states: Default::default(),
             complete_chan: Vec::new(),
             error: None,
-            start: Some(Utc::now()),
-            end: None,
+            start: Utc::now(),
             src_descriptor,
             dst_descriptor,
         })
@@ -355,6 +314,29 @@ impl<'n> RebuildJob<'n> {
                 }
             })
             .collect()
+    }
+
+    /// Create a RebuildRecord from RebuildJob
+    pub fn into_record(self) -> RebuildRecord {
+        trace!(
+            "Create Rebuild Record for child {} of nexus {}",
+            self.dst_uri,
+            self.nexus_name
+        );
+
+        RebuildRecord {
+            src_uri: self.src_uri.to_string(),
+            dst_uri: self.dst_uri.to_string(),
+            // TODO: Set boolean correctly after partial rebuild changes
+            partial_rebuild: false,
+            state: self.state(),
+            // TODO: Set data size correctly after partial rebuild changes
+            rebuilt_data_size: 0,
+            // If timestamp in rebuild job is invalid, set it as epoch in the
+            // record.
+            start: self.start.clone(),
+            end: Utc::now(),
+        }
     }
 
     /// TODO
