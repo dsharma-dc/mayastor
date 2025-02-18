@@ -23,6 +23,7 @@ mod nvmf;
 pub(crate) mod nvmx;
 mod nx;
 mod uring;
+pub mod crypto;
 pub mod util;
 
 pub trait BdevCreateDestroy: CreateDestroy + GetName + std::fmt::Debug {}

@@ -5,10 +5,7 @@ use std::{fmt::Display, fs, path::Path, sync::Mutex};
 use tonic::Status;
 
 use crate::{
-    core::{runtime, Cores, Reactor, Share, VerboseError},
-    grpc::rpc_submit,
-    lvs::{Lvs, LvsBdev, LvsError},
-    pool_backend::{PoolArgs, PoolBackend},
+    bdev::crypto::EncryptionKey, core::{runtime, Cores, Reactor, Share, VerboseError}, grpc::rpc_submit, lvs::{Lvs, LvsBdev, LvsError}, pool_backend::{PoolArgs, PoolBackend}
 };
 
 static CONFIG_FILE: OnceCell<String> = OnceCell::new();
@@ -159,6 +156,8 @@ struct Pool {
     #[serde(skip_serializing)]
     replicas: Option<Vec<Replica>>,
     backend: PoolBackend,
+    /// Encryption key - if the pool is encrypted.
+    enc_key: Option<EncryptionKey>,
 }
 
 /// Convert a Pool into a gRPC request payload
@@ -171,6 +170,8 @@ impl From<&Pool> for PoolArgs {
             cluster_size: None,
             md_args: None,
             backend: pool.backend,
+            enc_key: pool.enc_key.clone(),
+            crypto_vbdev_name: pool.enc_key.clone().map(|_| format!("crypto_{}", pool.name))
         }
     }
 }
@@ -186,6 +187,8 @@ impl From<LvsBdev> for Pool {
                 .unwrap_or_else(|| base.name().to_string())],
             replicas: None,
             backend: PoolBackend::Lvs,
+            // XXX: Check how we use this and set correctly.
+            enc_key: None,
         }
     }
 }

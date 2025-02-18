@@ -54,6 +54,27 @@ pub fn subcommands() -> Command {
                 .required(false)
                 .value_parser(PoolType::types().to_vec())
                 .default_value(PoolType::Lvs.as_ref()),
+        )
+        .arg(
+            Arg::new("cipher")
+                .short('c')
+                .long("cipher")
+                .help("The cipher to use for encryption")
+                .required(false),
+        )
+        .arg(
+            Arg::new("encryption-key")
+                .short('k')
+                .long("encryption-key")
+                .help("The encryption key of the pool in hexlified format")
+                .required(false),
+        )
+        .arg(
+            Arg::new("xts-key")
+                .short('e')
+                .long("xts-key")
+                .help("encryption key2 required for AES_XTS")
+                .required(false),
         );
 
     let import = Command::new("import")
@@ -86,6 +107,27 @@ pub fn subcommands() -> Command {
                 .required(false)
                 .value_parser(PoolType::types().to_vec())
                 .default_value(PoolType::Lvs.as_ref()),
+        )
+        .arg(
+            Arg::new("cipher")
+                .short('c')
+                .long("cipher")
+                .help("The cipher to use for encryption")
+                .required(false),
+        )
+        .arg(
+            Arg::new("encryption-key")
+                .short('k')
+                .long("encryption-key")
+                .help("The encryption key of the pool in hexlified format")
+                .required(false),
+        )
+        .arg(
+            Arg::new("xts-key")
+                .short('e')
+                .long("xts-key")
+                .help("encryption key2 required for AES_XTS")
+                .required(false),
         );
 
     let destroy = Command::new("destroy")
@@ -211,6 +253,18 @@ async fn create(mut ctx: Context, matches: &ArgMatches) -> crate::Result<()> {
         .to_owned();
 
     let uuid = matches.get_one::<String>("uuid");
+    let cipher = matches.get_one::<String>("cipher").unwrap_or(&String::from("invalid_cipher")).to_owned();
+    let enc_key = match matches.get_one::<String>("encryption-key") {
+        None if !cipher.eq_ignore_ascii_case("invalid_cipher") => return Err(Status::invalid_argument("Need key with cipher")).context(GrpcStatus),
+        Some(_) if cipher.eq_ignore_ascii_case("invalid_cipher") => None,
+        Some(k) => Some(k),
+        _ => None,
+    };
+    let xts_key = match matches.get_one::<String>("xts-key") {
+        Some(k2) => Some(k2.clone()),
+        None if cipher.eq_ignore_ascii_case("AES_XTS") => return Err(Status::invalid_argument("Need key2 for AES_XTS cipher")).context(GrpcStatus),
+        _ => None,
+    };
 
     let disks_list = matches
         .get_many::<String>("disk")
@@ -251,6 +305,19 @@ async fn create(mut ctx: Context, matches: &ArgMatches) -> crate::Result<()> {
         None => None,
     };
 
+    let enc_key_msg = enc_key.map(|k| v1rpc::common::EncryptionKey {
+        key_name: "key_".to_owned() + k.as_str(),
+        key: k.clone().into(),
+        key_length: (k.len() * 4) as u32,
+        key2: xts_key.as_ref().map(|k2| k2.clone().into()),
+        key2_length: xts_key.map(|x| {x.len() * 4} as u32) ,
+    });
+
+    let enc_info_msg = enc_key_msg.map(|e| v1rpc::common::Encryption {
+        cipher: v1rpc::common::Cipher::from_str_name(&cipher).unwrap().into(),
+        key: Some(e)
+    });
+
     let response = ctx
         .v1
         .pool
@@ -261,6 +328,7 @@ async fn create(mut ctx: Context, matches: &ArgMatches) -> crate::Result<()> {
             pooltype: v1rpc::pool::PoolType::from(pooltype) as i32,
             cluster_size,
             md_args: Some(v1rpc::pool::PoolMetadataArgs { md_resv_ratio }),
+            encryption: enc_info_msg,
         })
         .await
         .context(GrpcStatus)?;
@@ -281,6 +349,21 @@ async fn create(mut ctx: Context, matches: &ArgMatches) -> crate::Result<()> {
     };
 
     Ok(())
+}
+
+#[derive(EnumString, VariantNames, AsRefStr)]
+#[strum(serialize_all = "UPPERCASE")]
+pub(super) enum Cipher {
+    AesCbc,
+    AesXts,
+}
+impl From<Cipher> for v1rpc::common::Cipher{
+    fn from(value: Cipher) -> Self {
+        match value {
+            Cipher::AesCbc => Self::AesCbc,
+            Cipher::AesXts => Self::AesXts,
+        }
+    }
 }
 
 #[derive(EnumString, VariantNames, AsRefStr)]
@@ -311,6 +394,14 @@ async fn import(mut ctx: Context, matches: &ArgMatches) -> crate::Result<()> {
         })?
         .to_owned();
     let uuid = matches.get_one::<String>("uuid");
+    let cipher = matches.get_one::<String>("cipher").unwrap_or(&String::from("invalid_cipher")).to_owned();
+    let enc_key = matches.get_one::<String>("encryption-key");
+    let xts_key = match matches.get_one::<String>("xts-key") {
+        Some(k2) => Some(k2.clone()),
+        None if cipher.eq_ignore_ascii_case("AES_XTS") => return Err(Status::invalid_argument("Need key2 for AES_XTS cipher")).context(GrpcStatus),
+        _ => None,
+    };
+
     let disks_list = matches
         .get_many::<String>("disk")
         .ok_or_else(|| ClientError::MissingValue {
@@ -325,6 +416,19 @@ async fn import(mut ctx: Context, matches: &ArgMatches) -> crate::Result<()> {
         .map_err(|e| Status::invalid_argument(e.to_string()))
         .context(GrpcStatus)?;
 
+    let enc_key_msg = enc_key.map(|k| v1rpc::common::EncryptionKey {
+            key_name: "key_".to_owned() + k,
+            key: k.clone().into(),
+            key_length: k.len() as u32,
+            key2: xts_key.as_ref().map(|k2| k2.clone().into()),
+            key2_length: xts_key.map(|x| x.len() as u32),
+        });
+    
+    let enc_info_msg = enc_key_msg.map(|e| v1rpc::common::Encryption {
+            cipher: v1rpc::common::Cipher::from_str_name(&cipher).unwrap().into(),
+            key: Some(e)
+        });
+
     let response = ctx
         .v1
         .pool
@@ -333,6 +437,7 @@ async fn import(mut ctx: Context, matches: &ArgMatches) -> crate::Result<()> {
             uuid: uuid.map(ToString::to_string),
             disks: disks_list,
             pooltype: v1rpc::pool::PoolType::from(pooltype) as i32,
+            encryption: enc_info_msg,
         })
         .await
         .context(GrpcStatus)?;

@@ -429,7 +429,7 @@ impl Default for MayastorEnvironment {
             mayastor_config: None,
             ptpl_dir: None,
             pool_config: None,
-            delay_subsystem_init: false,
+            delay_subsystem_init: true,
             enable_coredump: true,
             env_context: None,
             hugedir: None,
@@ -1061,6 +1061,7 @@ impl MayastorEnvironment {
             let (sender, receiver) = oneshot::channel::<bool>();
 
             unsafe {
+                //let _ = enable_dpdk_cryptodev_scan_accel_module();
                 spdk_subsystem_init(
                     Some(Self::start_rpc),
                     Box::into_raw(Box::new(SubsystemCtx { rpc, sender })) as *mut _,
@@ -1069,7 +1070,6 @@ impl MayastorEnvironment {
 
             assert!(receiver.await.unwrap());
         });
-
         // load any pools that need to be created
         if let Some(config) = pool_config {
             config.import_pools();

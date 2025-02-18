@@ -195,6 +195,7 @@ impl PoolBuilderRpc {
                 disks: vec![self.bdev.as_ref().unwrap().clone()],
                 cluster_size: None,
                 md_args: None,
+                encryption: None,
             })
             .await
             .map(|r| r.into_inner())
@@ -271,6 +272,8 @@ impl PoolBuilderLocal {
             cluster_size: None,
             md_args: None,
             backend: Default::default(),
+            enc_key: None,
+            crypto_vbdev_name: None,
         })
         .await?;
         Ok(lvs)
